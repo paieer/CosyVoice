@@ -63,7 +63,11 @@ class CosyVoice:
         del configs
 
     def list_available_spks(self):
-        spks = list(self.frontend.spk2info.keys())
+        # spks = list(self.frontend.spk2info.keys())
+        # return spks
+        spk2info_path = os.path.join(self.model_dir, 'spk2info.pt')
+        spk2info = torch.load(spk2info_path)
+        spks = list(spk2info.keys())
         return spks
 
     def add_zero_shot_spk(self, prompt_text, prompt_speech_16k, zero_shot_spk_id):

@@ -48,6 +48,7 @@ class CosyVoiceFrontEnd:
         self.tokenizer = get_tokenizer()
         self.feat_extractor = feat_extractor
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.spk2info_path = spk2info
         option = onnxruntime.SessionOptions()
         option.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
         option.intra_op_num_threads = 1
@@ -71,6 +72,12 @@ class CosyVoiceFrontEnd:
             self.zh_tn_model = ZhNormalizer(remove_erhua=False, full_to_half=False, overwrite_cache=True)
             self.en_tn_model = EnNormalizer()
             self.inflect_parser = inflect.engine()
+
+    def load_spk2info(self):
+        if os.path.exists(self.spk2info_path):
+            self.spk2info = torch.load(self.spk2info_path, map_location=self.device)
+        else:
+            raise ValueError("spk2info.pt not found!!")
 
     def _extract_text_token(self, text):
         if isinstance(text, Generator):
@@ -149,6 +156,10 @@ class CosyVoiceFrontEnd:
         return texts if split is True else text
 
     def frontend_sft(self, tts_text, spk_id):
+        if spk_id not in self.spk2info:
+            self.load_spk2info()
+        if spk_id not in self.spk2info:
+            raise ValueError("spk_id not found in spk2info.pt")
         tts_text_token, tts_text_token_len = self._extract_text_token(tts_text)
         embedding = self.spk2info[spk_id]['embedding']
         model_input = {'text': tts_text_token, 'text_len': tts_text_token_len, 'llm_embedding': embedding, 'flow_embedding': embedding}
@@ -213,3 +224,19 @@ class CosyVoiceFrontEnd:
                        'prompt_speech_feat': prompt_speech_feat, 'prompt_speech_feat_len': prompt_speech_feat_len,
                        'flow_embedding': embedding}
         return model_input
+
+    def frontend_inference_voice(self,prompt_speech_16k,pretrained_model_dir,spk_id):
+        prompt_speech_22050 = torchaudio.transforms.Resample(orig_freq=16000, new_freq=22050)(prompt_speech_16k)
+        speech_feat, speech_feat_len = self._extract_speech_feat(prompt_speech_22050)
+        speech_token, speech_token_len = self._extract_speech_token(prompt_speech_16k)
+        embedding = self._extract_spk_embedding(prompt_speech_16k)
+        voice_tone = {
+             'speech_token': speech_token,
+             'speech_feat': speech_feat,
+             'embedding': embedding
+        }
+        spk2info_path = os.path.join(pretrained_model_dir, 'spk2info.pt')
+        spk2info = torch.load(spk2info_path)
+        spk2info[spk_id]  = voice_tone
+        torch.save(spk2info, spk2info_path)
+        return
